@@ -20,8 +20,9 @@ export default class App extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
-      url: 'https://api.testingpays.com/_YOUR_API_KEY_/optimal/v1/silentPost/',
-      paymentStatusUrl: 'http://_YOUR_SERVER_ADDRESS/api/optimal/',
+      url: 'https://api.testingpays.com/_YOUR_API_KEY_HERE_/optimal/v1/silentPost/',
+      // Replace this with your callback url (don't forget to set it in Testing Pays under network settings too!)
+      paymentStatusUrl: 'https://tp-phoenix-optimal.herokuapp.com/api/optimal/',
       paymentRef: () => Math.floor(Math.random() * (2000 - 100) + 100),
       html: null,
       lodaing: false,
@@ -34,9 +35,18 @@ export default class App extends React.Component {
       cv2Invalid: false,
     };
   }
+
+  validations(strict = false) {
+    return {
+      validateCardNumber: v => validate(['number', 'cardNumber', v || this.state.cardNumber], this.setState.bind(this), strict),
+      validateExpirationDate: v => validate(['expirationDate', 'expiry', manageDate(v || this.state.expiry)], this.setState.bind(this), strict),
+      validateCv2: v => validate(['cvv', 'cv2',  v || this.state.cv2], this.setState.bind(this), strict),
+    }
+  }
+
   renderForm() {
     return (
-      <View>
+      <View style={{flex: 1}}>
         {renderNavbar()}
         <View style={ styles.form }>
           <View style={ styles.inputWrapper }>
@@ -45,7 +55,8 @@ export default class App extends React.Component {
               style={ [styles.input, this.state.cardNumberInvalid && styles.invalidInput] }
               value={ this.state.cardNumber }
               keyboardType={ 'numeric' }
-              onChangeText={ v => validate(['number', 'cardNumber', v], this.setState.bind(this)) }
+              onChangeText={ this.validations().validateCardNumber }
+              underlineColorAndroid='transparent'
             />
             {renderError(this.state.cardNumberInvalid, 'cardNumber')}
           </View>
@@ -56,7 +67,8 @@ export default class App extends React.Component {
               style={ [styles.input, this.state.expiryInvalid && styles.invalidInput] }
               value={ this.state.expiry }
               keyboardType={ 'numeric' }
-              onChangeText={ v => validate(['expirationDate', 'expiry', manageDate(v)], this.setState.bind(this)) }
+              onChangeText={ this.validations().validateExpirationDate }
+              underlineColorAndroid='transparent'
             />
             {renderError(this.state.expiryInvalid, 'expiryDate')}
           </View>
@@ -67,7 +79,8 @@ export default class App extends React.Component {
               style={ [styles.input, this.state.cv2Invalid && styles.invalidInput] }
               value={ this.state.cv2 }
               keyboardType={ 'numeric' }
-              onChangeText={ v => validate(['cvv', 'cv2',  v], this.setState.bind(this)) }
+              onChangeText={ this.validations().validateCv2 }
+              underlineColorAndroid='transparent'
             />
             {renderError(this.state.cv2Invalid, 'CV2')}
           </View>
@@ -79,7 +92,7 @@ export default class App extends React.Component {
               containerStyle={ styles.button }
               accessibilityLabel='Submit Form'
               disabled={ !canSubmit(this.state) }
-              onPress={ () => submitForm(this.state, this.setState.bind(this), this.refs) }
+              onPress={ () => runValidations(this.validations(true), this.setState.bind(this), () => submitForm(this.state, this.setState.bind(this), this.refs)) }
             />
           </View>
         </View>
@@ -90,7 +103,7 @@ export default class App extends React.Component {
   render() {
     return (
       <KeyboardAvoidingView style={ styles.container }>
-        <StatusBar hidden={ true } />
+        <StatusBar hidden={ true } transparent={ false } />
         <Spinner visible={ this.state.loading } overlayColor={ colors.primary } />
         <Toast
           position='bottom'
@@ -157,6 +170,7 @@ function submitForm({url, paymentStatusUrl, paymentRef, cv2, expiry = '/', cardN
     .then(() => setTimeout(() => setState({loading: false}), 1000))
     .then(() => pollServer(paymentStatusUrl.concat(ref), errorToast, successToast, setState))
     .catch(err => {
+      console.log('Error on submit form', err);
       setState({loading: false});
       errorToast.show('Sorry there was an error while starting the transaction. Please double check your api key is correct', DURATION.LENGTH_LONG);
     });
@@ -179,6 +193,7 @@ async function pollServer(paymentStatusUrl, errorToast, successToast, setState, 
       setTimeout(() => pollServer(paymentStatusUrl, errorToast, successToast, setState, attempts + 1), 1000);
     }
   } catch(e) {
+    console.log('Error on result', e);
     handleResult({status: 'network_error'}, errorToast, successToast);
     setState({html: null})
   }
@@ -212,15 +227,24 @@ function canSubmit({cardNumberInvalid, expiryInvalid, cv2Invalid}) {
   return (cardNumberInvalid && expiryInvalid && cv2Invalid) ? 'true' : 'false';
 };
 
-function validate(tuple, setState) {
-  const [ funcName, propName, value ] = tuple;
+function runValidations(validations, setState, successFunc, results = []) {
+  Object.keys(validations).forEach(f => results.push(validations[f]()));
+
+  if (results.every(r => r === true)) {
+    return successFunc();
+  }
+};
+
+function validate([ funcName, propName, value ], setState, strict = false) {
   setState({[propName]: value});
 
-  const result = validateCard[funcName](value);
+  const {isValid, isPotentiallyValid} = validateCard[funcName](value);
 
-  setState({
-    [propName.concat('Invalid')]: result.isPotentiallyValid ? false: true
-  });
+  const validCheck = strict ? isValid : isPotentiallyValid;
+
+  setState({ [propName.concat('Invalid')]: validCheck ? false: true});
+
+  return validCheck;
 };
 
 function getError(type) {
@@ -261,12 +285,11 @@ const styles = StyleSheet.create({
     height: 25,
   },
   form: {
-    flex: 1,
     padding: 40,
     marginTop: 40,
   },
   inputWrapper: {
-    marginBottom: 100,
+    marginBottom: 20,
   },
   inputLabel: {
     fontSize: 18,
@@ -290,10 +313,10 @@ const styles = StyleSheet.create({
     color: colors.invalid,
   },
   button: {
+    marginTop: '20',
     backgroundColor: colors.background,
   },
   errorText: {
     color: 'red',
-    marginBottom: 40,
   },
 });
